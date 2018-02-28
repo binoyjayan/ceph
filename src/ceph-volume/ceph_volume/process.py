@@ -2,7 +2,7 @@ from fcntl import fcntl, F_GETFL, F_SETFL
 from os import O_NONBLOCK, read
 import subprocess
 from select import select
-from ceph_volume import terminal
+from ceph_volume import terminal, util
 
 import logging
 
@@ -102,6 +102,8 @@ def run(command, **kw):
     stop_on_error = kw.pop('stop_on_error', True)
     command_msg = obfuscate(command, kw.pop('obfuscate', None))
     fail_msg = kw.pop('fail_msg', None)
+    executable = util.system.which(command.pop(0))
+    command.insert(0, executable)
     logger.info(command_msg)
     terminal.write(command_msg)
     terminal_logging = kw.pop('terminal_logging', True)
@@ -166,6 +168,8 @@ def call(command, **kw):
     terminal_verbose = kw.pop('terminal_verbose', False)
     logfile_verbose = kw.pop('logfile_verbose', True)
     show_command = kw.pop('show_command', False)
+    executable = util.system.which(command.pop(0))
+    command.insert(0, executable)
     command_msg = "Running command: %s" % ' '.join(command)
     stdin = kw.pop('stdin', None)
     logger.info(command_msg)
