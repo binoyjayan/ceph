@@ -15,6 +15,9 @@
  */
 
 #include <unistd.h>
+#include <fstream>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "include/Context.h"
 #include "include/random.h"
@@ -2201,6 +2204,80 @@ void AsyncConnection::_stop()
   center->dispatch_event_external(EventCallbackRef(new C_clean_handler(this)));
 }
 
+void dump_ceph_msg_header(const char *file, struct ceph_msg_header &h)
+{
+	ofstream f;
+	struct stat sb;
+
+	if (lstat(file, &sb) >= 0)
+		return;
+
+	f.open(file);
+	f << "msg seq    : " << h.seq << std::endl;
+	f << "tid        : " << h.tid << std::endl;
+	f << "msg type   : " << h.type << std::endl;
+	f << "priority   : " << h.priority << std::endl;
+	f << "version    : " << h.version << std::endl;
+	f << "front len  : " << h.front_len << std::endl;
+	f << "middle len : " << h.middle_len << std::endl;
+	f << "data len   : " << h.data_len << std::endl;
+	f << "data off   : " << h.data_off << std::endl;
+
+	f.close();
+
+}
+
+void dump_message(Message *msg, int features, int crcflags)
+{
+	struct stat sb;
+	std::ofstream fs;
+	char f[32];
+	bufferlist payload;
+	bufferlist front, middle, data;
+	ceph_msg_footer_old old_footer;
+	ceph_msg_footer footer;
+
+	// already encoded in prepare_send_message
+	// msg->encode(features, crcflags);
+	encode(msg->get_header(), payload);
+
+	// Here's where we switch to the old footer format.  PLR
+
+	footer = msg->get_footer();
+	old_footer.front_crc = footer.front_crc;
+	old_footer.middle_crc = footer.middle_crc;
+	old_footer.data_crc = footer.data_crc;
+	old_footer.flags = footer.flags;
+	//encode(old_footer, payload);
+	encode(footer, payload);
+
+	encode(msg->get_payload(), payload);
+	encode(msg->get_middle(), payload);
+	encode(msg->get_data(), payload);
+
+	//switch (msg->get_type()) {
+	//case CEPH_MSG_OSD_OP:
+	//case CEPH_MSG_OSD_OPREPLY:
+	//	return;
+	//}
+
+	sprintf(f, "/tmp/head.%d", msg->get_type());
+	dump_ceph_msg_header(f, msg->get_header());
+
+	sprintf(f, "/tmp/msg.%d", msg->get_type());
+	if (lstat(f, &sb) < 0) {
+		int fd = ::open(f, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+		if (fd >= 0) {
+			payload.write_fd(fd);
+			::close(fd);
+		}
+
+		//fs.open(f);
+		//fs.write(payload.c_str(), payload.length());
+		//fs.close();
+	}
+}
+
 void AsyncConnection::prepare_send_message(uint64_t features, Message *m, bufferlist &bl)
 {
   ldout(async_msgr->cct, 20) << __func__ << " m" << " " << *m << dendl;
@@ -2219,6 +2296,7 @@ void AsyncConnection::prepare_send_message(uint64_t features, Message *m, buffer
   bl.append(m->get_payload());
   bl.append(m->get_middle());
   bl.append(m->get_data());
+  dump_message(m, features, msgr->crcflags);
 }
 
 ssize_t AsyncConnection::write_message(Message *m, bufferlist& bl, bool more)
